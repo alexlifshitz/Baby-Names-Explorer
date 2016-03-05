@@ -1,0 +1,177 @@
+---
+title: "Top 10 Baby Names Explorer"
+author: "Alexander Lifshitz"
+date: "February 28, 2016"
+output: 
+  ioslides_presentation: 
+    logo: top10_logo_small.png
+    widescreen: yes
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Introduction
+
+* <span style="color:red">Top 10 Baby Names Explorer</span> App allows users to explore baby names popularity in different US states since 1910 to 2014.
+* The app shows top 10 baby names for a selected set of input parameters, and also shows a color-coded US map, which allows to compare popularity of these names across all US states.
+* The app is available on shinyapps.io website ([link](https://datarocks.shinyapps.io/DP-project/))
+* For this project we used US baby names dataset obtained from Kaggle ([link](https://kaggle2.blob.core.windows.net/datasets/13/13/files/StateNames.csv.zip))
+ 
+
+## Interactive User Interface
+
+* The app allows a user to interactively select US State, Year of Birth and Gender of the baby
+* Similarly to the app, the widget below can be used to select input parameters. 
+
+```{r, echo=FALSE, message=FALSE, cache=TRUE}
+baby.names<- readRDS("baby_names.Rds")
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+states_list<-scan("states.txt", what="", sep="\n")
+library(Hmisc)
+library(dplyr)
+library(scales)
+library(ggplot2)
+
+inputPanel(
+  selectInput("state", label = "State", c("All States", states_list), selected = "CA"),
+  sliderInput("years", label = "Born in", min = 1910, max = 2014, value = 1910,sep = ""),
+  radioButtons("gender", label = "Gender", choices = c("Female", "Male"), selected = "Female")
+)
+```
+
+* 
+```{r, echo=FALSE, message=FALSE}
+renderText({paste("You selected:    State:", input$state, ", Birth Year:", input$years,  ", Gender:", input$gender)
+})
+```
+* The charts in the next two slides will explore popular baby names for the selected parameters 
+
+## Chart 1 
+```{r, echo=FALSE, message=FALSE}
+renderText({paste("Top 10", input$gender, "baby names born in ", input$state, " in ", input$years)
+})
+```
+
+```{r, echo=FALSE, message=FALSE}
+
+n=10
+
+renderPlot({
+          
+     dff<-filter(baby.names, Year==input$years)
+     if (input$state !="All States"){
+          dff<-filter(dff, State==input$state)
+     }
+     
+     
+     dff<-filter(dff, Gender==substr(input$gender,1,1))
+     
+     Total <- sum(dff$Count)
+     dff_n<- group_by(dff, Name) %>% dplyr::summarize(Count=sum(Count)) %>% top_n(n,Count)
+     dff_n <- mutate(dff_n, Percent= Count/Total) %>% arrange(desc(Percent))
+     dff_n <- dff_n[1:n,]
+     dff_n <- within(dff_n, Name <- factor(Name, levels=names(sort(table(Name), 
+                                                                   decreasing=TRUE))))
+     
+     ggplot(dff_n, aes(x=reorder(Name, Percent), y=Percent, fill = as.factor(Name))) + geom_bar(stat = "identity") +
+          geom_text(data=dff_n,aes(x=reorder(Name, Percent),y=Percent/2,label=Name),size=8)+
+          theme(axis.ticks.y = element_blank(),axis.text.y = element_blank(),
+                axis.title.x=element_blank(),axis.title.y=element_blank())+
+          guides(fill=FALSE)+ scale_y_continuous(labels=percent)+coord_flip()
+})
+```
+
+## Chart 2
+
+```{r, echo=FALSE, message=FALSE}
+renderText({ 
+          paste("Baby names popularity with respect to ",  input$state, "(",input$gender,"names,",input$years, ")")
+})
+```
+
+* The chart below compares popular names in different states and visualizes how they compare to the selected state.
+<small>Dark green areas correspond to high similarity with repect to the selected state, whereas light green or white areas correspond to low similarity.</small>
+
+```{r definition, echo = FALSE}
+my.dist <- function(list1, list2, n) {
+## list1 and list2 must be ordered by popularity names lists (descending)
+     a<-abs(match(list1[1:n], list2)-1:n)# Find rank differences of first n names of list1 vs list2  
+     a[is.na(a)]<-length(list2)
+     a[a>=2*n]=2*n  # Limit the maximum difference to 2*n
+     d1<-sum(a)/n   # Find average distance
+  
+     a<-abs(match(list2[1:n], list1)-1:n)# Find rank differences of first n names of list2 vs list1
+     a[is.na(a)]<-length(list1)
+     a[a>=2*n]=2*n  # Limit the maximum difference to 2*n
+     d2<-sum(a)/n   # Find average distance
+     
+     d<-(d1+d2)/2   #Make the metric symmetric,i.e. my.dist(list1,list2)=my.dist(list2,list1)
+     return(d)
+}
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+library(maps)
+library(mapproj)
+
+renderPlot({
+     
+          dff<-filter(baby.names, Year==input$years)
+          dff<-filter(dff, Gender==substr(input$gender,1,1))
+          
+          if (input$state !="All States"){
+               ref<-filter(dff, State==input$state)
+          }
+          else{
+               ref<-dff
+          }
+          
+          ref<- group_by(ref, Name) %>% dplyr::summarize(Count=sum(Count)) %>% arrange(desc(Count))
+          dff<- group_by(dff, State, Name) %>% dplyr::summarize(Count=sum(Count)) %>% arrange(desc(Count)) %>% select(-Count)
+          dsum<-dplyr::summarize(dff, dist = my.dist(ref$Name, Name, n)) %>% mutate(State_long=state.name[match(State,state.abb)])
+
+          nb=2*n
+          shades <- colorRampPalette(c("darkgreen","white"))(nb)
+          br <- as.integer(cut2(dsum$dist, seq(0,n, length.out = nb)))
+          
+          dsum$fills <- shades[br]
+         
+          namevec <- map(database = "state", col = "white",fill=T, namesonly=TRUE)
+          namevec<-gsub(":.*", "", namevec)
+          ind<- match(namevec,tolower(dsum$State_long))
+          map(database = "state")
+          map(database = "state",col = dsum$fills[ind],fill=TRUE,add=TRUE)
+          text(x=state.center$x, y=state.center$y, state.abb, cex=0.9, font=2)
+          ind<- match(input$state, state.abb)
+          text(x=state.center$x[ind], y=state.center$y[ind], input$state, cex=0.9, col = "white", font=2)
+})
+```
+
+## Appendix I - Names similarity metric definition
+
+* The following metric was used to compare names popularity between states 
+```{r, echo = TRUE, eval = FALSE,results='markup'}
+my.dist <- function(list1, list2, n) {
+## list1 and list2 must be ordered by popularity names lists (descending)
+# Find rank differences of first n names of list1 vs list2
+     a<-abs(match(list1[1:n], list2)-1:n)  
+     a[is.na(a)]<-length(list2)
+     a[a>=2*n]=2*n  # Limit the maximum difference to 2*n
+     d1<-sum(a)/n   # Find average distance
+# Find rank differences of first n names of list2 vs list1
+     a<-abs(match(list2[1:n], list1)-1:n)
+     a[is.na(a)]<-length(list1)
+     a[a>=2*n]=2*n  # Limit the maximum difference to 2*n
+     d2<-sum(a)/n   # Find average distance
+#Make the metric symmetric, such that my.dist(list1,list2)=my.dist(list2,list1)
+     d<-(d1+d2)/2   
+     return(d)
+}
+```

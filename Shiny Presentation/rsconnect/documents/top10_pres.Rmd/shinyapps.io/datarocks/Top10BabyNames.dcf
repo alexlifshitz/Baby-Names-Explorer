@@ -1,0 +1,9 @@
+name: Top10BabyNames
+account: datarocks
+server: shinyapps.io
+appId: 86044
+bundleId: 382984
+url: https://datarocks.shinyapps.io/Top10BabyNames/
+when: 1456706087.72324
+asMultiple: FALSE
+asStatic: FALSE
